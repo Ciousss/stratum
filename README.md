@@ -79,6 +79,16 @@ A decentralized content platform for Stacks, supporting content registration, ac
 - `get-access-details`: Get access details for a user.
 - `get-user-subscription`: Get user's subscription details.
 
+## New Read-Only Functions
+
+- `search-content-by-category`: Search content by category.
+- `get-access-details`: Get detailed access info for a user.
+- `get-user-subscription`: Get subscription details for a user.
+- `get-content-count`: Get total content count.
+- `get-subscription-count`: Get total subscription count.
+- `is-contract-paused`: Check contract pause state.
+- `get-contract-owner`: Get contract owner address.
+
 ---
 
 ## Error Codes
@@ -120,3 +130,31 @@ Interact using Clarity calls to register content, manage access, subscriptions, 
 ## License
 
 MIT License (see repository for details).
+
+---
+
+## Input Validation
+
+The contract now includes comprehensive input validation for:
+- Price ranges and formats
+- Content metadata (CID, title, description)
+- Categories and tags
+- Subscription parameters
+- Rating values
+- Revenue split percentages
+
+## Owner Controls
+
+Content owners can now:
+- Update content prices with validation
+- Revoke user access to content
+- Manage subscription tiers
+- Configure revenue sharing
+
+## Analytics
+
+Enhanced tracking for:
+- Content views and purchases
+- Revenue generation
+- Subscription usage
+- Rating aggregation
