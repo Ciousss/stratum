@@ -114,18 +114,57 @@
 (define-private (log-rating-added (content-id uint) (user principal) (rating uint))
   (print {event: "rating-added", content-id: content-id, user: user, rating: rating}))
 
-;; Input validation helpers
+;; Enhanced input validation helpers
 (define-private (is-valid-price (price uint))
-  (> price u0))
+  (and (> price u0) (<= price u1000000000000))) ;; Max 1 trillion microSTX
 
 (define-private (is-valid-cid (cid (string-ascii 100)))
-  (> (len cid) u0))
+  (and (> (len cid) u0) (<= (len cid) u100)))
+
+(define-private (is-valid-key-hash (key-hash (buff 32)))
+  (is-eq (len key-hash) u32))
+
+(define-private (is-valid-category (category (string-ascii 50)))
+  (and (> (len category) u0) (<= (len category) u50)))
+
+(define-private (is-valid-title (title (string-ascii 100)))
+  (and (> (len title) u0) (<= (len title) u100)))
+
+(define-private (is-valid-description (description (string-ascii 500)))
+  (<= (len description) u500))
+
+(define-private (is-valid-content-type (content-type (string-ascii 20)))
+  (and (> (len content-type) u0) (<= (len content-type) u20)))
+
+(define-private (is-valid-tier (tier (string-ascii 20)))
+  (and (> (len tier) u0) (<= (len tier) u20)))
+
+(define-private (is-valid-duration (duration uint))
+  (and (> duration u0) (<= duration u525600))) ;; Max 1 year in blocks
+
+(define-private (is-valid-max-downloads (max-downloads uint))
+  (<= max-downloads u10000)) ;; Reasonable limit
+
+(define-private (is-valid-review (review (string-ascii 300)))
+  (<= (len review) u300))
 
 (define-private (is-valid-percentage (percentage uint))
   (and (>= percentage u0) (<= percentage u100)))
 
 (define-private (is-valid-rating (rating uint))
   (and (>= rating u1) (<= rating u5)))
+
+(define-private (validate-tags (tags (list 10 (string-ascii 30))))
+  (fold validate-single-tag tags true))
+
+(define-private (validate-single-tag (tag (string-ascii 30)) (acc bool))
+  (and acc (<= (len tag) u30)))
+
+(define-private (validate-features (features (list 5 (string-ascii 50))))
+  (fold validate-single-feature features true))
+
+(define-private (validate-single-feature (feature (string-ascii 50)) (acc bool))
+  (and acc (<= (len feature) u50)))
 
 ;; Administrative functions
 (define-public (pause-contract)
@@ -147,7 +186,7 @@
     (var-set contract-owner new-owner)
     (ok true)))
 
-;; Enhanced content registration with metadata
+;; Enhanced content registration with comprehensive validation
 (define-public (register-content 
   (cid (string-ascii 100)) 
   (key-hash (buff 32)) 
@@ -162,45 +201,57 @@
       ;; Check if contract is paused
       (asserts! (not (var-get paused)) (err ERR_CONTRACT_PAUSED))
       
-      ;; Input validation
+      ;; Comprehensive input validation
       (asserts! (is-valid-price price) (err ERR_INVALID_PRICE))
       (asserts! (is-valid-cid cid) (err ERR_INVALID_INPUT))
-      (asserts! (> (len key-hash) u0) (err ERR_INVALID_INPUT))
-      (asserts! (> (len title) u0) (err ERR_INVALID_INPUT))
+      (asserts! (is-valid-key-hash key-hash) (err ERR_INVALID_INPUT))
+      (asserts! (is-valid-category category) (err ERR_INVALID_INPUT))
+      (asserts! (is-valid-title title) (err ERR_INVALID_INPUT))
+      (asserts! (is-valid-description description) (err ERR_INVALID_INPUT))
+      (asserts! (is-valid-content-type content-type) (err ERR_INVALID_INPUT))
+      (asserts! (validate-tags tags) (err ERR_INVALID_INPUT))
       
-      ;; Store content with metadata
-      (map-set contents id { 
-        owner: tx-sender, 
-        cid: cid, 
-        key-hash: key-hash, 
-        price: price,
-        created-at: stacks-block-height,
-        category: category,
-        title: title,
-        description: description,
-        tags: tags,
-        content-type: content-type
-      })
-      
-      ;; Initialize analytics
-      (map-set content-analytics id {
-        view-count: u0,
-        purchase-count: u0,
-        revenue-generated: u0
-      })
-      
-      ;; Initialize ratings
-      (map-set content-ratings id {
-        total-rating: u0,
-        rating-count: u0,
-        average-rating: u0
-      })
-      
-      (var-set content-counter id)
-      
-      ;; Log event
-      (log-content-registered id tx-sender price)
-      (ok id))))
+      ;; Store content with validated metadata - using validated variables
+      (let ((validated-cid (if (is-valid-cid cid) cid "default"))
+            (validated-category (if (is-valid-category category) category "general"))
+            (validated-title (if (is-valid-title title) title "Untitled"))
+            (validated-description (if (is-valid-description description) description ""))
+            (validated-content-type (if (is-valid-content-type content-type) content-type "document"))
+            (validated-tags (if (validate-tags tags) tags (list)))
+            (validated-price (if (is-valid-price price) price u1000000)))
+        (begin
+          (map-set contents id { 
+            owner: tx-sender, 
+            cid: validated-cid, 
+            key-hash: key-hash, 
+            price: validated-price,
+            created-at: stacks-block-height,
+            category: validated-category,
+            title: validated-title,
+            description: validated-description,
+            tags: validated-tags,
+            content-type: validated-content-type
+          })
+          
+          ;; Initialize analytics
+          (map-set content-analytics id {
+            view-count: u0,
+            purchase-count: u0,
+            revenue-generated: u0
+          })
+          
+          ;; Initialize ratings
+          (map-set content-ratings id {
+            total-rating: u0,
+            rating-count: u0,
+            average-rating: u0
+          })
+          
+          (var-set content-counter id)
+          
+          ;; Log event
+          (log-content-registered id tx-sender validated-price)
+          (ok id))))))
 
 ;; Backward compatible content registration
 (define-public (register-content-simple (cid (string-ascii 100)) (key-hash (buff 32)) (price uint))
@@ -227,7 +278,7 @@
 (define-private (get-percentage (split {recipient: principal, percentage: uint}))
   (get percentage split))
 
-;; Subscription creation
+;; Subscription creation with enhanced validation
 (define-public (create-subscription
   (content-id uint)
   (tier (string-ascii 20))
@@ -244,20 +295,30 @@
         (begin
           (asserts! (is-eq tx-sender (get owner content)) (err ERR_UNAUTHORIZED))
           (asserts! (is-valid-price price) (err ERR_INVALID_PRICE))
-          (asserts! (> duration u0) (err ERR_INVALID_INPUT))
+          (asserts! (is-valid-tier tier) (err ERR_INVALID_INPUT))
+          (asserts! (is-valid-duration duration) (err ERR_INVALID_INPUT))
+          (asserts! (is-valid-max-downloads max-downloads) (err ERR_INVALID_INPUT))
+          (asserts! (validate-features features) (err ERR_INVALID_INPUT))
           
-          (map-set subscriptions subscription-id {
-            content-id: content-id,
-            tier: tier,
-            duration: duration,
-            price: price,
-            max-downloads: max-downloads,
-            features: features,
-            created-at: stacks-block-height
-          })
-          
-          (var-set subscription-counter subscription-id)
-          (ok subscription-id))))))
+          ;; Use validated variables
+          (let ((validated-tier (if (is-valid-tier tier) tier "basic"))
+                (validated-duration (if (is-valid-duration duration) duration u144))
+                (validated-price (if (is-valid-price price) price u1000000))
+                (validated-max-downloads (if (is-valid-max-downloads max-downloads) max-downloads u100))
+                (validated-features (if (validate-features features) features (list))))
+            (begin
+              (map-set subscriptions subscription-id {
+                content-id: content-id,
+                tier: validated-tier,
+                duration: validated-duration,
+                price: validated-price,
+                max-downloads: validated-max-downloads,
+                features: validated-features,
+                created-at: stacks-block-height
+              })
+              
+              (var-set subscription-counter subscription-id)
+              (ok subscription-id))))))))
 
 ;; Purchase subscription
 (define-public (buy-subscription (subscription-id uint))
@@ -326,13 +387,14 @@
         error (err ERR_TRANSFER_FAILED)))
     error (err error)))
 
-;; Rating system
+;; Rating system with enhanced validation
 (define-public (rate-content (content-id uint) (rating uint) (review (string-ascii 300)))
   (let ((content-opt (map-get? contents content-id)))
     (begin
       (asserts! (not (var-get paused)) (err ERR_CONTRACT_PAUSED))
       (asserts! (is-some content-opt) (err ERR_NOT_FOUND))
       (asserts! (is-valid-rating rating) (err ERR_INVALID_RATING))
+      (asserts! (is-valid-review review) (err ERR_INVALID_INPUT))
       
       ;; Check if user already rated
       (asserts! (is-none (map-get? user-ratings {content-id: content-id, user: tx-sender})) (err ERR_ALREADY_RATED))
@@ -340,18 +402,22 @@
       ;; Check if user has access
       (asserts! (unwrap! (has-access content-id tx-sender) (err ERR_UNAUTHORIZED)) (err ERR_UNAUTHORIZED))
       
-      ;; Add user rating
-      (map-set user-ratings {content-id: content-id, user: tx-sender} {
-        rating: rating,
-        review: review,
-        created-at: stacks-block-height
-      })
-      
-      ;; Update aggregate rating
-      (update-aggregate-rating content-id rating)
-      
-      (log-rating-added content-id tx-sender rating)
-      (ok true))))
+      ;; Use validated variables
+      (let ((validated-rating (if (is-valid-rating rating) rating u1))
+            (validated-review (if (is-valid-review review) review "")))
+        (begin
+          ;; Add user rating
+          (map-set user-ratings {content-id: content-id, user: tx-sender} {
+            rating: validated-rating,
+            review: validated-review,
+            created-at: stacks-block-height
+          })
+          
+          ;; Update aggregate rating
+          (update-aggregate-rating content-id validated-rating)
+          
+          (log-rating-added content-id tx-sender validated-rating)
+          (ok true))))))
 
 (define-private (update-aggregate-rating (content-id uint) (new-rating uint))
   (let ((current-ratings-opt (map-get? content-ratings content-id)))
@@ -460,7 +526,7 @@
 (define-read-only (search-content-by-category (category (string-ascii 50)))
   (ok category)) ;; Simplified - in practice would need iteration
 
-;; Content owner functions
+;; Content owner functions with enhanced validation
 (define-public (update-content-price (id uint) (new-price uint))
   (let ((content-opt (map-get? contents id)))
     (if (is-some content-opt)
@@ -468,8 +534,11 @@
           (begin
             (asserts! (is-eq tx-sender (get owner content)) (err ERR_UNAUTHORIZED))
             (asserts! (is-valid-price new-price) (err ERR_INVALID_PRICE))
-            (map-set contents id (merge content {price: new-price}))
-            (ok true)))
+            ;; Use validated price
+            (let ((validated-price (if (is-valid-price new-price) new-price u1000000)))
+              (begin
+                (map-set contents id (merge content {price: validated-price}))
+                (ok true)))))
         (err ERR_NOT_FOUND))))
 
 (define-public (revoke-access (content-id uint) (user principal))
