@@ -186,7 +186,7 @@
     (var-set contract-owner new-owner)
     (ok true)))
 
-;; Enhanced content registration with comprehensive validation
+;; FIXED: Enhanced content registration with PROPER validation (no fallbacks)
 (define-public (register-content 
   (cid (string-ascii 100)) 
   (key-hash (buff 32)) 
@@ -201,7 +201,7 @@
       ;; Check if contract is paused
       (asserts! (not (var-get paused)) (err ERR_CONTRACT_PAUSED))
       
-      ;; Comprehensive input validation
+      ;; CRITICAL FIX: Reject invalid inputs instead of using fallbacks
       (asserts! (is-valid-price price) (err ERR_INVALID_PRICE))
       (asserts! (is-valid-cid cid) (err ERR_INVALID_INPUT))
       (asserts! (is-valid-key-hash key-hash) (err ERR_INVALID_INPUT))
@@ -211,47 +211,37 @@
       (asserts! (is-valid-content-type content-type) (err ERR_INVALID_INPUT))
       (asserts! (validate-tags tags) (err ERR_INVALID_INPUT))
       
-      ;; Store content with validated metadata - using validated variables
-      (let ((validated-cid (if (is-valid-cid cid) cid "default"))
-            (validated-category (if (is-valid-category category) category "general"))
-            (validated-title (if (is-valid-title title) title "Untitled"))
-            (validated-description (if (is-valid-description description) description ""))
-            (validated-content-type (if (is-valid-content-type content-type) content-type "document"))
-            (validated-tags (if (validate-tags tags) tags (list)))
-            (validated-price (if (is-valid-price price) price u1000000)))
-        (begin
-          (map-set contents id { 
-            owner: tx-sender, 
-            cid: validated-cid, 
-            key-hash: key-hash, 
-            price: validated-price,
-            created-at: stacks-block-height,
-            category: validated-category,
-            title: validated-title,
-            description: validated-description,
-            tags: validated-tags,
-            content-type: validated-content-type
-          })
-          
-          ;; Initialize analytics
-          (map-set content-analytics id {
-            view-count: u0,
-            purchase-count: u0,
-            revenue-generated: u0
-          })
-          
-          ;; Initialize ratings
-          (map-set content-ratings id {
-            total-rating: u0,
-            rating-count: u0,
-            average-rating: u0
-          })
-          
-          (var-set content-counter id)
-          
-          ;; Log event
-          (log-content-registered id tx-sender validated-price)
-          (ok id))))))
+      ;; Store content with ORIGINAL validated inputs (no fallbacks)
+      (map-set contents id { 
+        owner: tx-sender, 
+        cid: cid,  ;; Use original, not fallback
+        key-hash: key-hash, 
+        price: price,  ;; Use original, not fallback
+        created-at: stacks-block-height,
+        category: category,  ;; Use original, not fallback
+        title: title,  ;; Use original, not fallback
+        description: description,  ;; Use original, not fallback
+        tags: tags,  ;; Use original, not fallback
+        content-type: content-type  ;; Use original, not fallback
+      })
+      
+      ;; Initialize analytics
+      (map-set content-analytics id {
+        view-count: u0,
+        purchase-count: u0,
+        revenue-generated: u0
+      })
+      
+      ;; Initialize ratings
+      (map-set content-ratings id {
+        total-rating: u0,
+        rating-count: u0,
+        average-rating: u0
+      })
+      
+      (var-set content-counter id)
+      (log-content-registered id tx-sender price)
+      (ok id))))
 
 ;; Backward compatible content registration
 (define-public (register-content-simple (cid (string-ascii 100)) (key-hash (buff 32)) (price uint))
@@ -278,7 +268,7 @@
 (define-private (get-percentage (split {recipient: principal, percentage: uint}))
   (get percentage split))
 
-;; Subscription creation with enhanced validation
+;; FIXED: Subscription creation with proper validation (no fallbacks)
 (define-public (create-subscription
   (content-id uint)
   (tier (string-ascii 20))
@@ -294,31 +284,26 @@
       (let ((content (unwrap! content-opt (err ERR_NOT_FOUND))))
         (begin
           (asserts! (is-eq tx-sender (get owner content)) (err ERR_UNAUTHORIZED))
+          ;; CRITICAL FIX: Reject invalid inputs instead of using fallbacks
           (asserts! (is-valid-price price) (err ERR_INVALID_PRICE))
           (asserts! (is-valid-tier tier) (err ERR_INVALID_INPUT))
           (asserts! (is-valid-duration duration) (err ERR_INVALID_INPUT))
           (asserts! (is-valid-max-downloads max-downloads) (err ERR_INVALID_INPUT))
           (asserts! (validate-features features) (err ERR_INVALID_INPUT))
           
-          ;; Use validated variables
-          (let ((validated-tier (if (is-valid-tier tier) tier "basic"))
-                (validated-duration (if (is-valid-duration duration) duration u144))
-                (validated-price (if (is-valid-price price) price u1000000))
-                (validated-max-downloads (if (is-valid-max-downloads max-downloads) max-downloads u100))
-                (validated-features (if (validate-features features) features (list))))
-            (begin
-              (map-set subscriptions subscription-id {
-                content-id: content-id,
-                tier: validated-tier,
-                duration: validated-duration,
-                price: validated-price,
-                max-downloads: validated-max-downloads,
-                features: validated-features,
-                created-at: stacks-block-height
-              })
-              
-              (var-set subscription-counter subscription-id)
-              (ok subscription-id))))))))
+          ;; Store subscription with ORIGINAL validated inputs
+          (map-set subscriptions subscription-id {
+            content-id: content-id,
+            tier: tier,  ;; Use original, not fallback
+            duration: duration,  ;; Use original, not fallback
+            price: price,  ;; Use original, not fallback
+            max-downloads: max-downloads,  ;; Use original, not fallback
+            features: features,  ;; Use original, not fallback
+            created-at: stacks-block-height
+          })
+          
+          (var-set subscription-counter subscription-id)
+          (ok subscription-id))))))
 
 ;; Purchase subscription
 (define-public (buy-subscription (subscription-id uint))
@@ -342,8 +327,8 @@
         (begin
           (asserts! (>= (stx-get-balance tx-sender) price) (err ERR_INSUFFICIENT_PAYMENT))
           
-          ;; Handle revenue distribution
-          (try! (distribute-revenue content-id price))
+          ;; Handle revenue distribution with proper error handling
+          (try! (distribute-revenue-secure content-id price))
           
           ;; Grant subscription access
           (map-set user-subscriptions {subscription-id: subscription-id, user: tx-sender} {
@@ -359,65 +344,72 @@
           (log-subscription-purchased content-id tx-sender subscription-id)
           (ok true))))))
 
-;; Revenue distribution helper
-(define-private (distribute-revenue (content-id uint) (amount uint))
+;; FIXED: Secure revenue distribution with proper error handling
+(define-private (distribute-revenue-secure (content-id uint) (amount uint))
   (let ((content-opt (map-get? contents content-id))
         (splits-opt (map-get? revenue-splits content-id)))
     (begin
       (asserts! (is-some content-opt) (err ERR_NOT_FOUND))
       (let ((content (unwrap! content-opt (err ERR_NOT_FOUND))))
         (match splits-opt
-          splits (distribute-to-recipients (get splits splits) amount)
-          ;; No revenue split defined, pay owner directly
+          splits 
+          (begin
+            ;; SECURITY: Validate splits before distribution
+            (asserts! (is-eq (fold + (map get-percentage (get splits splits)) u0) u100) 
+                     (err ERR_INVALID_PERCENTAGE))
+            (try! (distribute-to-recipients-secure (get splits splits) amount))
+            (ok amount))
+          ;; No revenue split defined, pay owner directly with error handling
           (match (stx-transfer? amount tx-sender (get owner content))
             success (ok amount)
             error (err ERR_TRANSFER_FAILED)))))))
 
-(define-private (distribute-to-recipients (splits (list 5 {recipient: principal, percentage: uint})) (total-amount uint))
-  (fold distribute-single-payment splits (ok total-amount)))
+(define-private (distribute-to-recipients-secure 
+  (splits (list 5 {recipient: principal, percentage: uint})) 
+  (total-amount uint))
+  (let ((distribution-result (fold distribute-single-payment-secure splits {amount: total-amount, success: true})))
+    (if (get success distribution-result)
+        (ok (get amount distribution-result))
+        (err ERR_TRANSFER_FAILED))))
 
-(define-private (distribute-single-payment 
+(define-private (distribute-single-payment-secure
   (split {recipient: principal, percentage: uint}) 
-  (acc (response uint uint)))
-  (match acc
-    total-amount 
-    (let ((payment-amount (/ (* total-amount (get percentage split)) u100)))
-      (match (stx-transfer? payment-amount tx-sender (get recipient split))
-        success (ok total-amount)
-        error (err ERR_TRANSFER_FAILED)))
-    error (err error)))
+  (acc {amount: uint, success: bool}))
+  (if (get success acc)
+      (let ((payment-amount (/ (* (get amount acc) (get percentage split)) u100)))
+        (match (stx-transfer? payment-amount tx-sender (get recipient split))
+          success acc
+          error {amount: (get amount acc), success: false}))
+      acc))
 
-;; Rating system with enhanced validation
+;; FIXED: Rating system with proper validation (no fallbacks)
 (define-public (rate-content (content-id uint) (rating uint) (review (string-ascii 300)))
   (let ((content-opt (map-get? contents content-id)))
     (begin
       (asserts! (not (var-get paused)) (err ERR_CONTRACT_PAUSED))
       (asserts! (is-some content-opt) (err ERR_NOT_FOUND))
+      ;; CRITICAL FIX: Reject invalid inputs instead of using fallbacks
       (asserts! (is-valid-rating rating) (err ERR_INVALID_RATING))
       (asserts! (is-valid-review review) (err ERR_INVALID_INPUT))
       
       ;; Check if user already rated
       (asserts! (is-none (map-get? user-ratings {content-id: content-id, user: tx-sender})) (err ERR_ALREADY_RATED))
       
-      ;; Check if user has access
-      (asserts! (unwrap! (has-access content-id tx-sender) (err ERR_UNAUTHORIZED)) (err ERR_UNAUTHORIZED))
+      ;; Check if user has access (enhanced to check both direct and subscription access)
+      (asserts! (unwrap! (has-access-enhanced content-id tx-sender) (err ERR_UNAUTHORIZED)) (err ERR_UNAUTHORIZED))
       
-      ;; Use validated variables
-      (let ((validated-rating (if (is-valid-rating rating) rating u1))
-            (validated-review (if (is-valid-review review) review "")))
-        (begin
-          ;; Add user rating
-          (map-set user-ratings {content-id: content-id, user: tx-sender} {
-            rating: validated-rating,
-            review: validated-review,
-            created-at: stacks-block-height
-          })
-          
-          ;; Update aggregate rating
-          (update-aggregate-rating content-id validated-rating)
-          
-          (log-rating-added content-id tx-sender validated-rating)
-          (ok true))))))
+      ;; Store rating with ORIGINAL validated inputs
+      (map-set user-ratings {content-id: content-id, user: tx-sender} {
+        rating: rating,  ;; Use original, not fallback
+        review: review,  ;; Use original, not fallback
+        created-at: stacks-block-height
+      })
+      
+      ;; Update aggregate rating
+      (update-aggregate-rating content-id rating)
+      
+      (log-rating-added content-id tx-sender rating)
+      (ok true))))
 
 (define-private (update-aggregate-rating (content-id uint) (new-rating uint))
   (let ((current-ratings-opt (map-get? content-ratings content-id)))
@@ -454,7 +446,7 @@
         revenue-generated: revenue
       }))))
 
-;; Enhanced buy-access with revenue sharing
+;; Enhanced buy-access with secure revenue sharing
 (define-public (buy-access (id uint))
   (let ((content-result (map-get? contents id)))
     (begin
@@ -480,8 +472,8 @@
       ;; Check sufficient balance
       (asserts! (>= (stx-get-balance tx-sender) price) (err ERR_INSUFFICIENT_PAYMENT))
       
-      ;; Distribute revenue
-      (try! (distribute-revenue id price))
+      ;; Distribute revenue with secure error handling
+      (try! (distribute-revenue-secure id price))
       
       ;; Grant access
       (map-set access {content-id: id, user: tx-sender} {granted-at: stacks-block-height, active: true, expires-at: none})
@@ -491,6 +483,38 @@
       
       (log-access-purchased id tx-sender price)
       (ok true))))
+
+;; FIXED: Enhanced access control that checks both direct purchase AND subscriptions
+(define-read-only (has-valid-subscription-access (content-id uint) (user principal))
+  (let ((current-block stacks-block-height))
+    (fold check-subscription-access 
+          (list u1 u2 u3 u4 u5 u6 u7 u8 u9 u10) ;; Check up to 10 possible subscriptions
+          {content-id: content-id, user: user, current-block: current-block, has-access: false})))
+
+(define-private (check-subscription-access 
+  (subscription-id uint) 
+  (context {content-id: uint, user: principal, current-block: uint, has-access: bool}))
+  (if (get has-access context)
+      context  ;; Already found valid access
+      (match (map-get? subscriptions subscription-id)
+        subscription
+        (if (is-eq (get content-id subscription) (get content-id context))
+            (match (map-get? user-subscriptions {subscription-id: subscription-id, user: (get user context)})
+              user-sub
+              (if (and (get active user-sub)
+                      (<= (get current-block context) (get expires-at user-sub))
+                      (< (get downloads-used user-sub) (get max-downloads subscription)))
+                  (merge context {has-access: true})
+                  context)
+              context)
+            context)
+        context)))
+
+;; SECURITY FIX: Enhanced access control that checks both direct purchase AND subscriptions
+(define-read-only (has-access-enhanced (content-id uint) (user principal))
+  (let ((direct-access (unwrap! (has-access content-id user) (ok false)))
+        (subscription-access (get has-access (has-valid-subscription-access content-id user))))
+    (ok (or direct-access subscription-access))))
 
 ;; Read-only functions
 (define-read-only (get-content (id uint))
@@ -526,19 +550,18 @@
 (define-read-only (search-content-by-category (category (string-ascii 50)))
   (ok category)) ;; Simplified - in practice would need iteration
 
-;; Content owner functions with enhanced validation
+;; FIXED: Content owner functions with proper validation (no fallbacks)
 (define-public (update-content-price (id uint) (new-price uint))
   (let ((content-opt (map-get? contents id)))
     (if (is-some content-opt)
         (let ((content (unwrap! content-opt (err ERR_NOT_FOUND))))
           (begin
             (asserts! (is-eq tx-sender (get owner content)) (err ERR_UNAUTHORIZED))
+            ;; CRITICAL FIX: Reject invalid price instead of using fallback
             (asserts! (is-valid-price new-price) (err ERR_INVALID_PRICE))
-            ;; Use validated price
-            (let ((validated-price (if (is-valid-price new-price) new-price u1000000)))
-              (begin
-                (map-set contents id (merge content {price: validated-price}))
-                (ok true)))))
+            ;; Use original validated price
+            (map-set contents id (merge content {price: new-price}))
+            (ok true)))
         (err ERR_NOT_FOUND))))
 
 (define-public (revoke-access (content-id uint) (user principal))
